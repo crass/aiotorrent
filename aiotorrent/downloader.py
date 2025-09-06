@@ -53,10 +53,19 @@ class FilesDownloadManager:
 		
 
 
-	def create_pieces_queue(self, file: File) -> None:
+	def create_pieces_queue(self, file: File, only_blocks: bool = False) -> None:
 		piece_def = 3   # Default piece priority
 		for piece_num in range(file.start_piece, file.end_piece + 1):
-			self.file_pieces.put_nowait((piece_def, piece_num))
+			block_range = None
+			if only_blocks:
+				block_start = 0
+				block_end = None
+				if piece_num == file.start_piece:
+					block_start, _ = divmod(file.start_byte, BLOCK_SIZE)
+				if piece_num == file.end_piece:
+					block_end, _ = divmod(file.end_byte, BLOCK_SIZE)
+				block_range = (block_start, block_end)
+			self.file_pieces.put_nowait((piece_def, piece_num, block_range))
 
 
 	def file_downloaded(self) -> None:
@@ -66,13 +75,17 @@ class FilesDownloadManager:
 		return True if self.file_pieces.empty() else False
 
 
-	async def get_file(self, file: File, validate: bool = True) -> Piece:
-		self.create_pieces_queue(file)
+	async def get_file(self, file: File, only_blocks: bool = False, validate: bool = True) -> Piece:
+		if only_blocks and not validate:
+			logger.warn(f"Only downloading partial pieces while validation is on, so some pieces will never validate. Disabling validation.")
+			validate = False
+
+		self.create_pieces_queue(file, only_blocks)
 		task_list = list()
 
 		while not self.file_downloaded():
-			prio_piece, num = await self.file_pieces.get()
-			piece = Piece(num, prio_piece, self.piece_info)
+			prio_piece, num, block_range = await self.file_pieces.get()
+			piece = Piece(num, prio_piece, self.piece_info, block_range)
 			task = asyncio.create_task(piece.download(self.peer_queue))
 			task_list.append(task)
 
@@ -106,8 +119,8 @@ class FilesDownloadManager:
 		while not self.file_downloaded():
 			async with sema:
 				await sema.acquire()
-				prio_piece, num = await self.file_pieces.get()
-				piece = Piece(num, prio_piece, self.piece_info)
+				prio_piece, num, block_range = await self.file_pieces.get()
+				piece = Piece(num, prio_piece, self.piece_info, block_range)
 				# Passing semaphore so that piece can release it when it finishes fetching
 				# all the blocks for itself
 				task = asyncio.create_task(piece.download(self.peer_queue, _semaphore=sema))
