@@ -298,7 +298,12 @@ class HTTPTracker(TrackerBaseClass):
 
 			if response.status == 200:
 				self.active = True
-				self.announce_response = bdecode(response.read())
+				r = response.read()
+				try:
+					self.announce_response = bdecode(r)
+				except Exception as e:
+					e.args = (e.args[0] + f' ({r})',)
+					raise
 				peer_list = self.announce_response['peers']
 				for ip_addr in chunk(peer_list, 6):
 					ip, port = unpack('>IH', ip_addr)
