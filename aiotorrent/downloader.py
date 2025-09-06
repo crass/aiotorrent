@@ -83,11 +83,11 @@ class FilesDownloadManager:
 				self.file_pieces.put_nowait((1, piece.num))
 				continue
 
-			if file.start_piece == piece.num:
-				piece.data = piece.data[file.start_byte:]
-
 			if file.end_piece == piece.num:
 				piece.data = piece.data[:file.end_byte]
+
+			if file.start_piece == piece.num:
+				piece.data = piece.data[file.start_byte:]
 
 			file._set_bytes_written(file.get_bytes_written() + len(piece.data))
 			yield piece
